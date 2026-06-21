@@ -34,6 +34,26 @@ var (
 // gradient colors used to paint the logo line by line.
 var logoColors = []color.Color{mauve, pink, blue, teal, green}
 
+// Developer / project info (from https://tanzid.dev).
+const (
+	devName     = "Md Tanzid Haque"
+	devRole     = "Software Developer · Laravel · Go · Next.js · real-time systems"
+	devLocation = "Dhaka, Bangladesh"
+	devWebsite  = "https://tanzid.dev"
+	devGitHub   = "https://github.com/tanzid64"
+	githubUser  = "tanzid64"
+	devLinkedIn = "https://linkedin.com/in/tanzid64"
+	devMedium   = "https://medium.com/@tanzid64"
+	projectRepo = "https://github.com/tanzid64/th-note"
+)
+
+// link renders a clickable OSC 8 terminal hyperlink using the given style.
+// Supported terminals (iTerm2, GNOME Terminal, Kitty, WezTerm, Windows
+// Terminal) make the label clickable; others just show the styled label.
+func link(style lipgloss.Style, url, label string) string {
+	return style.Hyperlink(url).Render(label)
+}
+
 var logo = []string{
 	" ████████╗██╗  ██╗      ███╗   ██╗ ██████╗ ████████╗███████╗",
 	" ╚══██╔══╝██║  ██║      ████╗  ██║██╔═══██╗╚══██╔══╝██╔════╝",
@@ -79,6 +99,16 @@ var (
 	currentMatchStyle = lipgloss.NewStyle().Foreground(base).Background(pink).Bold(true)
 
 	listTitleStyle = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+
+	// About screen
+	linkStyle         = lipgloss.NewStyle().Foreground(blue).Underline(true)
+	aboutHeadingStyle = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+	aboutLabelStyle   = lipgloss.NewStyle().Foreground(teal)
+	aboutNameStyle    = lipgloss.NewStyle().Foreground(pink).Bold(true)
+	aboutBoxStyle     = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(mauve).
+				Padding(1, 3)
 
 	red             = lipgloss.Color("#f38ba8")
 	confirmStyle    = lipgloss.NewStyle().Foreground(red).Bold(true)
@@ -167,6 +197,7 @@ const (
 	screenEditor
 	screenList
 	screenDetail
+	screenAbout
 )
 
 // focusField identifies which editor field is active.
@@ -273,6 +304,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateList(msg)
 		case screenDetail:
 			return m.updateDetail(msg)
+		case screenAbout:
+			return m.updateAbout(msg)
 		default:
 			return m.updateWelcome(msg)
 		}
@@ -302,6 +335,20 @@ func (m model) updateWelcome(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openEditor(note{}, screenWelcome)
 	case "l":
 		return m.openList()
+	case "a":
+		m.screen = screenAbout
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) updateAbout(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc", "q", "a":
+		m.screen = screenWelcome
+		return m, nil
 	}
 	return m, nil
 }
@@ -780,6 +827,10 @@ func (m model) welcome() string {
 
 	tagline := taglineStyle.Render("✨ your notes, right in the terminal")
 
+	// Clickable GitHub link (OSC 8): shows just the username, ctrl+click (or
+	// click) opens the profile in the browser on supporting terminals.
+	githubLink := link(linkStyle, devGitHub, githubUser)
+
 	hint := func(key, desc string) string {
 		return keyStyle.Render(key) + " " + keyDescStyle.Render(desc)
 	}
@@ -789,10 +840,12 @@ func (m model) welcome() string {
 		"   ",
 		hint("l", "notes"),
 		"   ",
+		hint("a", "about"),
+		"   ",
 		hint("q", "quit"),
 	)
 
-	content := lipgloss.JoinVertical(lipgloss.Center, art, "", tagline, "", help)
+	content := lipgloss.JoinVertical(lipgloss.Center, art, "", tagline, githubLink, "", help)
 	return boxStyle.Render(content)
 }
 
@@ -966,6 +1019,58 @@ func (m model) detailView() string {
 	return editorBoxStyle.Render(inner)
 }
 
+func (m model) about() string {
+	heading := aboutHeadingStyle.Render("th-note") +
+		keyDescStyle.Render("  "+version)
+
+	desc := mdText.Render(
+		"A fast, colorful note-taking app that lives in your terminal.\n" +
+			"Write in Markdown with autosave, browse a searchable list,\n" +
+			"preview rendered notes, and search words inside a note —\n" +
+			"all without leaving the keyboard.",
+	)
+
+	linkRow := func(label, url string) string {
+		return aboutLabelStyle.Render(label) + "  " +
+			link(linkStyle, url, url)
+	}
+
+	devBlock := lipgloss.JoinVertical(
+		lipgloss.Left,
+		aboutHeadingStyle.Render("Developer"),
+		"",
+		aboutNameStyle.Render(devName),
+		keyDescStyle.Render(devRole),
+		keyDescStyle.Render("📍 "+devLocation),
+		"",
+		linkRow("Website ", devWebsite),
+		linkRow("GitHub  ", devGitHub),
+		linkRow("LinkedIn", devLinkedIn),
+		linkRow("Medium  ", devMedium),
+	)
+
+	divider := dividerStyle.Render(strings.Repeat("─", 52))
+
+	footer := helpStyle.Render(helpKeyStyle.Render("esc") + " back  ·  " +
+		helpKeyStyle.Render("ctrl+c") + " quit")
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		heading,
+		"",
+		desc,
+		"",
+		dividerStyle.Render(strings.Repeat("─", 52)),
+		"",
+		devBlock,
+		"",
+		divider,
+		"",
+		footer,
+	)
+	return aboutBoxStyle.Render(content)
+}
+
 func (m model) View() tea.View {
 	var content string
 	switch m.screen {
@@ -975,6 +1080,8 @@ func (m model) View() tea.View {
 		content = m.listView()
 	case screenDetail:
 		content = m.centered(m.detailView())
+	case screenAbout:
+		content = m.centered(m.about())
 	default:
 		content = m.centered(m.welcome())
 	}

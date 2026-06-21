@@ -182,6 +182,7 @@ Launch the app and you'll land on the welcome screen. Everything is keyboard-dri
 | --- | --------------- |
 | `n` | New note        |
 | `l` | Browse notes    |
+| `a` | About           |
 | `q` | Quit            |
 
 ### Editor (`n` / `e`)
@@ -243,8 +244,19 @@ go vet ./...      # static checks
 
 The codebase is small:
 
-- `main.go` — UI, screens (welcome, editor, list, detail), and persistence.
+- `main.go` — UI, screens (welcome, editor, list, detail, about), and persistence.
 - `notes.go` — loading notes from disk and adapting them to the list.
+
+## Author
+
+**Md Tanzid Haque** — Software Developer (Laravel · Go · Next.js · real-time systems), Dhaka, Bangladesh.
+
+- 🌐 Website — [tanzid.dev](https://tanzid.dev)
+- 🐙 GitHub — [@tanzid64](https://github.com/tanzid64)
+- 💼 LinkedIn — [in/tanzid64](https://linkedin.com/in/tanzid64)
+- ✍️ Medium — [@tanzid64](https://medium.com/@tanzid64)
+
+You can also see this inside the app on the **About** screen (press `a`).
 
 ## License
 
