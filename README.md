@@ -1,5 +1,7 @@
 # th-note ✨
 
+> 🌐 **Website & docs:** [tanzid.dev/th-note](https://tanzid.dev/th-note/)
+
 A fast, colorful note-taking app that lives in your terminal — built with [Go](https://go.dev) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 Write notes in Markdown, browse them in a searchable paginated list, preview the rendered Markdown, and never leave the keyboard. Notes are plain `.md` files on disk, so they're yours forever.
