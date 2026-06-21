@@ -56,9 +56,45 @@ Each note is a normal `.md` file (`# Title` followed by the body), so you can re
 
 ## Installation
 
-th-note runs on **Linux, macOS, and Windows**. Pick whichever method suits you.
+th-note runs on **Linux, macOS, and Windows**. The easiest options need **no Go and no build step** — just download a pre-built binary from [**Releases**](https://github.com/tanzid64/th-note/releases).
 
-### Option 1 — Install with Go (all operating systems)
+### Option 1 — One-line install (Linux & macOS) ⭐
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tanzid64/th-note/main/install.sh | sh
+```
+
+This detects your OS/architecture, downloads the latest release binary, and installs it onto your `PATH`. Then run `th-note`.
+
+### Option 2 — Download a binary manually (all operating systems)
+
+Grab the right archive from the [latest release](https://github.com/tanzid64/th-note/releases/latest):
+
+| OS                    | Download                        | Then…                                                        |
+| --------------------- | ------------------------------- | ------------------------------------------------------------ |
+| **Linux** (x86-64)    | `th-note_linux_amd64.tar.gz`    | `tar -xzf` it, then `sudo mv th-note /usr/local/bin/`        |
+| **Linux** (ARM64)     | `th-note_linux_arm64.tar.gz`    | same as above                                                |
+| **macOS** (Intel)     | `th-note_darwin_amd64.tar.gz`   | `tar -xzf` it, then `sudo mv th-note /usr/local/bin/`        |
+| **macOS** (Apple Silicon) | `th-note_darwin_arm64.tar.gz` | same as above                                              |
+| **Windows** (x86-64)  | `th-note_windows_amd64.zip`     | unzip, then run `th-note.exe` (place it in a folder on your `PATH`) |
+
+You can also download directly with `curl`, e.g. for macOS Apple Silicon:
+
+```sh
+curl -fsSL -o th-note.tar.gz \
+  https://github.com/tanzid64/th-note/releases/latest/download/th-note_darwin_arm64.tar.gz
+tar -xzf th-note.tar.gz
+sudo mv th-note /usr/local/bin/
+th-note
+```
+
+Every release also ships a `checksums.txt` so you can verify your download with `sha256sum -c`.
+
+> **macOS Gatekeeper:** the binary isn't notarized, so the first launch may be blocked. Allow it with `xattr -d com.apple.quarantine /usr/local/bin/th-note`, or via *System Settings → Privacy & Security → Open Anyway*.
+
+> **Windows:** [Windows Terminal](https://aka.ms/terminal) is strongly recommended so the colors, logo, and emoji render correctly.
+
+### Option 3 — Install with Go (all operating systems)
 
 If you have [Go 1.26+](https://go.dev/dl/) installed, this is the quickest way:
 
@@ -83,7 +119,7 @@ Then just run:
 th-note
 ```
 
-### Option 2 — Build from source
+### Option 4 — Build from source
 
 ```bash
 # 1. Get the code
@@ -106,7 +142,7 @@ Run it:
 .\th-note.exe      # Windows (PowerShell)
 ```
 
-### Option 3 — Build a standalone binary (no Go needed to run)
+### Option 5 — Build a standalone binary yourself
 
 Go can cross-compile a single self-contained executable for any platform — no runtime or dependencies required on the target machine. From the project folder:
 
@@ -132,7 +168,7 @@ $env:GOOS="windows"; $env:GOARCH="amd64"; go build -o th-note.exe .
 
 Copy the resulting binary anywhere on the target machine and run it directly.
 
-> **Note:** Pre-built release binaries are not published yet. Until then, use one of the options above. (If/when GitHub Releases are added, you'll be able to download a binary directly and skip the build step.)
+> **Note:** Pre-built binaries for every tagged release are published automatically to [Releases](https://github.com/tanzid64/th-note/releases) by GitHub Actions (see `.github/workflows/release.yml`). Options 1 and 2 use those, so most people won't need to build anything.
 
 ---
 
