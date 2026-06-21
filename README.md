@@ -1,6 +1,6 @@
 # th-note ✨
 
-> 🌐 **Website & docs:** [tanzid.dev/th-note](https://tanzid.dev/th-note/)
+> 🌐 **Website & docs:** [th-note.tanzid.dev](https://th-note.tanzid.dev/)
 
 A fast, colorful note-taking app that lives in your terminal — built with [Go](https://go.dev) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
