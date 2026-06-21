@@ -992,7 +992,23 @@ func (m model) centered(box string) string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
+// version is set at build time via -ldflags by GoReleaser; "dev" for local builds.
+var version = "dev"
+
 func main() {
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "-v", "--version", "version":
+			fmt.Println("th-note " + version)
+			return
+		case "-h", "--help", "help":
+			fmt.Println("th-note — a terminal note-taking app\n\n" +
+				"Usage: th-note [--version] [--help]\n\n" +
+				"Run with no arguments to launch the app.")
+			return
+		}
+	}
+
 	p := tea.NewProgram(initialModel())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
