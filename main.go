@@ -10,8 +10,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -71,6 +73,12 @@ var (
 	helpStyle = lipgloss.NewStyle().Foreground(subtle)
 
 	helpKeyStyle = lipgloss.NewStyle().Foreground(teal)
+
+	// In-note search match highlight
+	matchStyle        = lipgloss.NewStyle().Foreground(base).Background(yellow)
+	currentMatchStyle = lipgloss.NewStyle().Foreground(base).Background(pink).Bold(true)
+
+	listTitleStyle = lipgloss.NewStyle().Foreground(mauve).Bold(true)
 
 	// Markdown preview styles
 	mdH1     = lipgloss.NewStyle().Foreground(mauve).Bold(true).Underline(true)
@@ -153,6 +161,8 @@ type screen int
 const (
 	screenWelcome screen = iota
 	screenEditor
+	screenList
+	screenDetail
 )
 
 // focusField identifies which editor field is active.
@@ -175,14 +185,26 @@ type model struct {
 
 	editSeq int // bumped on each edit; the autosave tick checks it
 
-	title    textinput.Model
-	body     textarea.Model
-	focus    focusField
-	preview  bool   // markdown preview toggled on?
-	dirty    bool   // unsaved changes since last write
-	savedAt  string // last save time, for the status bar
-	savePath string // current file on disk
-	status   string // transient message (e.g. errors)
+	title        textinput.Model
+	body         textarea.Model
+	focus        focusField
+	preview      bool   // markdown preview toggled on?
+	dirty        bool   // unsaved changes since last write
+	savedAt      string // last save time, for the status bar
+	savePath     string // current file on disk
+	status       string // transient message (e.g. errors)
+	editorReturn screen // screen to return to when leaving the editor
+
+	// List screen
+	list list.Model
+
+	// Detail screen
+	viewport   viewport.Model
+	detail     note            // the note currently open for reading
+	search     textinput.Model // in-note word search
+	searching  bool            // search box focused/accepting input
+	matchLines []int           // line indices in the detail body with matches
+	matchIdx   int             // which match is currently focused
 }
 
 func initialModel() model {
@@ -195,11 +217,24 @@ func initialModel() model {
 	ta.Placeholder = "Start writing… markdown supported. Try ctrl+t for a timestamp."
 	ta.ShowLineNumbers = true
 
+	delegate := list.NewDefaultDelegate()
+	l := list.New(nil, delegate, 0, 0)
+	l.Title = "Your notes"
+	l.SetShowTitle(true)
+	l.Styles.Title = listTitleStyle
+
+	se := textinput.New()
+	se.Placeholder = "search word…"
+	se.Prompt = "/"
+
 	return model{
-		screen: screenWelcome,
-		title:  ti,
-		body:   ta,
-		focus:  focusTitle,
+		screen:   screenWelcome,
+		title:    ti,
+		body:     ta,
+		focus:    focusTitle,
+		list:     l,
+		viewport: viewport.New(),
+		search:   se,
 	}
 }
 
@@ -225,15 +260,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		if m.screen == screenEditor {
+		switch m.screen {
+		case screenEditor:
 			return m.updateEditor(msg)
+		case screenList:
+			return m.updateList(msg)
+		case screenDetail:
+			return m.updateDetail(msg)
+		default:
+			return m.updateWelcome(msg)
 		}
-		return m.updateWelcome(msg)
 	}
 
-	// Forward non-key messages (cursor blink, etc.) to the active field.
-	if m.screen == screenEditor {
+	// Forward non-key messages (cursor blink, scrolling, etc.) to the active
+	// component.
+	var cmd tea.Cmd
+	switch m.screen {
+	case screenEditor:
 		return m.routeToField(msg)
+	case screenList:
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
+	case screenDetail:
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -243,12 +293,45 @@ func (m model) updateWelcome(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "n":
-		m.screen = screenEditor
-		m.focus = focusTitle
-		m.layout()
-		return m, m.title.Focus()
+		return m.openEditor(note{}, screenWelcome)
+	case "l":
+		return m.openList()
 	}
 	return m, nil
+}
+
+// openList loads notes from disk into the list and shows the list screen.
+func (m model) openList() (tea.Model, tea.Cmd) {
+	notes, err := loadNotes()
+	if err != nil {
+		m.status = "could not read notes: " + err.Error()
+	}
+	items := make([]list.Item, len(notes))
+	for i, n := range notes {
+		items[i] = noteItem{n: n}
+	}
+	m.list.SetItems(items)
+	m.screen = screenList
+	m.layout()
+	return m, nil
+}
+
+// openEditor switches to the editor, optionally pre-filled with an existing
+// note (zero note = blank), remembering which screen to return to.
+func (m model) openEditor(n note, ret screen) (tea.Model, tea.Cmd) {
+	m.title.SetValue(n.title)
+	m.body.SetValue(n.body)
+	m.savePath = n.path
+	m.dirty = false
+	m.savedAt = ""
+	m.status = ""
+	m.preview = false
+	m.focus = focusTitle
+	m.body.Blur()
+	m.editorReturn = ret
+	m.screen = screenEditor
+	m.layout()
+	return m, m.title.Focus()
 }
 
 func (m model) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -259,9 +342,12 @@ func (m model) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		m.save()
-		m.screen = screenWelcome
 		m.title.Blur()
 		m.body.Blur()
+		if m.editorReturn == screenList {
+			return m.openList()
+		}
+		m.screen = screenWelcome
 		return m, nil
 
 	case "tab", "shift+tab":
@@ -317,6 +403,209 @@ func (m model) routeToField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// --- List screen -----------------------------------------------------------
+
+func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// While the filter input is active, let the list own every key.
+	if m.list.SettingFilter() {
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc", "q":
+		// If a filter is applied, the first esc clears it (handled by list).
+		if m.list.IsFiltered() {
+			break
+		}
+		m.screen = screenWelcome
+		return m, nil
+	case "n":
+		return m.openEditor(note{}, screenList)
+	case "enter":
+		if it, ok := m.list.SelectedItem().(noteItem); ok {
+			return m.openDetail(it.n)
+		}
+		return m, nil
+	case "e":
+		if it, ok := m.list.SelectedItem().(noteItem); ok {
+			return m.openEditor(it.n, screenList)
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+// --- Detail screen ---------------------------------------------------------
+
+// openDetail shows a note in the read-only viewport.
+func (m model) openDetail(n note) (tea.Model, tea.Cmd) {
+	m.detail = n
+	m.screen = screenDetail
+	m.searching = false
+	m.search.SetValue("")
+	m.matchLines = nil
+	m.matchIdx = 0
+	m.layout()
+	m.viewport.SetContent(m.renderDetail())
+	m.viewport.GotoTop()
+	return m, nil
+}
+
+func (m model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.searching {
+		switch msg.String() {
+		case "esc":
+			m.searching = false
+			m.search.SetValue("")
+			m.search.Blur()
+			m.matchLines = nil
+			m.viewport.SetContent(m.renderDetail())
+			return m, nil
+		case "enter":
+			m.searching = false
+			m.search.Blur()
+			m.applySearch()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
+		m.applySearch()
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc", "q":
+		if len(m.matchLines) > 0 || m.search.Value() != "" {
+			// Clear an active search first.
+			m.search.SetValue("")
+			m.matchLines = nil
+			m.viewport.SetContent(m.renderDetail())
+			return m, nil
+		}
+		return m.openList()
+	case "/":
+		m.searching = true
+		return m, m.search.Focus()
+	case "n":
+		m.jumpMatch(1)
+		return m, nil
+	case "N":
+		m.jumpMatch(-1)
+		return m, nil
+	case "e":
+		return m.openEditor(m.detail, screenList)
+	}
+
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// detailLines returns the note as plain text lines (title + body), the basis
+// for both rendering and search.
+func (m model) detailLines() []string {
+	raw := "# " + m.detail.title + "\n\n" + m.detail.body
+	return strings.Split(raw, "\n")
+}
+
+// renderDetail returns the markdown-styled note for normal reading.
+func (m model) renderDetail() string {
+	return renderMarkdown("# "+m.detail.title+"\n\n"+m.detail.body, m.viewport.Width())
+}
+
+// applySearch recomputes matches for the current query and re-renders the
+// viewport as plain text with every match highlighted.
+func (m *model) applySearch() {
+	q := strings.TrimSpace(m.search.Value())
+	m.matchLines = nil
+	m.matchIdx = 0
+	if q == "" {
+		m.viewport.SetContent(m.renderDetail())
+		return
+	}
+
+	lq := strings.ToLower(q)
+	re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(q))
+	lines := m.detailLines()
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		if strings.Contains(strings.ToLower(ln), lq) {
+			m.matchLines = append(m.matchLines, i)
+			out[i] = re.ReplaceAllStringFunc(ln, func(s string) string {
+				return matchStyle.Render(s)
+			})
+		} else {
+			out[i] = ln
+		}
+	}
+	m.viewport.SetContent(strings.Join(out, "\n"))
+	if len(m.matchLines) > 0 {
+		m.scrollToMatch()
+	}
+}
+
+// jumpMatch moves to the next (dir=1) or previous (dir=-1) match and scrolls
+// to it, emphasising the focused match.
+func (m *model) jumpMatch(dir int) {
+	if len(m.matchLines) == 0 {
+		return
+	}
+	m.matchIdx = (m.matchIdx + dir + len(m.matchLines)) % len(m.matchLines)
+	m.rerenderWithCurrent()
+	m.scrollToMatch()
+}
+
+// rerenderWithCurrent re-highlights matches, emphasising the focused one.
+func (m *model) rerenderWithCurrent() {
+	q := strings.TrimSpace(m.search.Value())
+	if q == "" {
+		return
+	}
+	re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(q))
+	lq := strings.ToLower(q)
+	lines := m.detailLines()
+	current := -1
+	if m.matchIdx < len(m.matchLines) {
+		current = m.matchLines[m.matchIdx]
+	}
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		if !strings.Contains(strings.ToLower(ln), lq) {
+			out[i] = ln
+			continue
+		}
+		style := matchStyle
+		if i == current {
+			style = currentMatchStyle
+		}
+		out[i] = re.ReplaceAllStringFunc(ln, func(s string) string {
+			return style.Render(s)
+		})
+	}
+	m.viewport.SetContent(strings.Join(out, "\n"))
+}
+
+// scrollToMatch positions the viewport so the focused match line is visible.
+func (m *model) scrollToMatch() {
+	if m.matchIdx >= len(m.matchLines) {
+		return
+	}
+	target := m.matchLines[m.matchIdx] - m.viewport.Height()/2
+	if target < 0 {
+		target = 0
+	}
+	m.viewport.SetYOffset(target)
+}
+
 func (m *model) toggleFocus() {
 	if m.focus == focusTitle {
 		m.focus = focusBody
@@ -364,6 +653,22 @@ func (m *model) layout() {
 	}
 	m.body.SetWidth(inner)
 	m.body.SetHeight(bodyHeight)
+
+	// List fills most of the screen.
+	m.list.SetSize(m.width-4, m.height-2)
+
+	// Detail viewport leaves room for the header, search line, and help.
+	vpW := m.width - 6
+	if vpW < 20 {
+		vpW = 20
+	}
+	vpH := m.height - 6
+	if vpH < 3 {
+		vpH = 3
+	}
+	m.viewport.SetWidth(vpW)
+	m.viewport.SetHeight(vpH)
+	m.search.SetWidth(vpW - 4)
 }
 
 // --- Persistence -----------------------------------------------------------
@@ -442,6 +747,8 @@ func (m model) welcome() string {
 	help := lipgloss.JoinHorizontal(
 		lipgloss.Center,
 		hint("n", "new note"),
+		"   ",
+		hint("l", "notes"),
 		"   ",
 		hint("q", "quit"),
 	)
@@ -560,26 +867,79 @@ func (m model) helpLine() string {
 	)
 }
 
-func (m model) View() tea.View {
-	var box string
-	if m.screen == screenEditor {
-		box = m.editor()
-	} else {
-		box = m.welcome()
+func (m model) listView() string {
+	body := m.list.View()
+	help := helpStyle.Render(
+		helpKeyStyle.Render("enter") + " open · " +
+			helpKeyStyle.Render("/") + " search · " +
+			helpKeyStyle.Render("e") + " edit · " +
+			helpKeyStyle.Render("n") + " new · " +
+			helpKeyStyle.Render("esc") + " back",
+	)
+	return lipgloss.JoinVertical(lipgloss.Left, body, "", " "+help)
+}
+
+func (m model) detailView() string {
+	header := listTitleStyle.Render("📄 " + m.detail.title)
+
+	// Search status / input line.
+	var bar string
+	switch {
+	case m.searching:
+		bar = m.search.View()
+	case m.search.Value() != "":
+		n := len(m.matchLines)
+		pos := 0
+		if n > 0 {
+			pos = m.matchIdx + 1
+		}
+		bar = helpStyle.Render(fmt.Sprintf("/%s  — %d/%d matches", m.search.Value(), pos, n))
+	default:
+		bar = helpStyle.Render(strings.Repeat(" ", 1))
 	}
 
-	content := box
-	if m.width > 0 && m.height > 0 {
-		content = lipgloss.Place(
-			m.width, m.height,
-			lipgloss.Center, lipgloss.Center,
-			box,
-		)
+	help := helpStyle.Render(
+		helpKeyStyle.Render("/") + " search · " +
+			helpKeyStyle.Render("n/N") + " next/prev · " +
+			helpKeyStyle.Render("↑/↓") + " scroll · " +
+			helpKeyStyle.Render("e") + " edit · " +
+			helpKeyStyle.Render("esc") + " back",
+	)
+
+	inner := lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		bar,
+		m.viewport.View(),
+		help,
+	)
+	return editorBoxStyle.Render(inner)
+}
+
+func (m model) View() tea.View {
+	var content string
+	switch m.screen {
+	case screenEditor:
+		content = m.centered(m.editor())
+	case screenList:
+		content = m.listView()
+	case screenDetail:
+		content = m.centered(m.detailView())
+	default:
+		content = m.centered(m.welcome())
 	}
 
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
+}
+
+// centered places a box in the middle of the screen when dimensions are known.
+func (m model) centered(box string) string {
+	if m.width <= 0 || m.height <= 0 {
+		return box
+	}
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func main() {
