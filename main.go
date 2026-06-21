@@ -80,6 +80,10 @@ var (
 
 	listTitleStyle = lipgloss.NewStyle().Foreground(mauve).Bold(true)
 
+	red             = lipgloss.Color("#f38ba8")
+	confirmStyle    = lipgloss.NewStyle().Foreground(red).Bold(true)
+	confirmKeyStyle = lipgloss.NewStyle().Foreground(base).Background(red).Bold(true).Padding(0, 1)
+
 	// Markdown preview styles
 	mdH1     = lipgloss.NewStyle().Foreground(mauve).Bold(true).Underline(true)
 	mdH2     = lipgloss.NewStyle().Foreground(pink).Bold(true)
@@ -196,7 +200,9 @@ type model struct {
 	editorReturn screen // screen to return to when leaving the editor
 
 	// List screen
-	list list.Model
+	list          list.Model
+	confirmDelete bool // delete-confirmation prompt is showing
+	deleteTarget  note // note pending deletion
 
 	// Detail screen
 	viewport   viewport.Model
@@ -311,6 +317,8 @@ func (m model) openList() (tea.Model, tea.Cmd) {
 		items[i] = noteItem{n: n}
 	}
 	m.list.SetItems(items)
+	m.confirmDelete = false
+	m.deleteTarget = note{}
 	m.screen = screenList
 	m.layout()
 	return m, nil
@@ -406,6 +414,18 @@ func (m model) routeToField(msg tea.Msg) (tea.Model, tea.Cmd) {
 // --- List screen -----------------------------------------------------------
 
 func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// The delete-confirmation prompt captures all keys until answered.
+	if m.confirmDelete {
+		switch msg.String() {
+		case "y", "Y", "enter":
+			return m.deleteTargetNote()
+		default: // n, N, esc, anything else cancels
+			m.confirmDelete = false
+			m.deleteTarget = note{}
+			return m, nil
+		}
+	}
+
 	// While the filter input is active, let the list own every key.
 	if m.list.SettingFilter() {
 		var cmd tea.Cmd
@@ -435,11 +455,30 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.openEditor(it.n, screenList)
 		}
 		return m, nil
+	case "d":
+		if it, ok := m.list.SelectedItem().(noteItem); ok {
+			m.confirmDelete = true
+			m.deleteTarget = it.n
+		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+// deleteTargetNote removes the pending note from disk and reloads the list.
+func (m model) deleteTargetNote() (tea.Model, tea.Cmd) {
+	target := m.deleteTarget
+	m.confirmDelete = false
+	m.deleteTarget = note{}
+	if target.path != "" {
+		if err := os.Remove(target.path); err != nil {
+			m.status = "delete failed: " + err.Error()
+		}
+	}
+	return m.openList()
 }
 
 // --- Detail screen ---------------------------------------------------------
@@ -869,14 +908,25 @@ func (m model) helpLine() string {
 
 func (m model) listView() string {
 	body := m.list.View()
-	help := helpStyle.Render(
-		helpKeyStyle.Render("enter") + " open · " +
-			helpKeyStyle.Render("/") + " search · " +
-			helpKeyStyle.Render("e") + " edit · " +
-			helpKeyStyle.Render("n") + " new · " +
-			helpKeyStyle.Render("esc") + " back",
-	)
-	return lipgloss.JoinVertical(lipgloss.Left, body, "", " "+help)
+
+	var footer string
+	if m.confirmDelete {
+		footer = " " + confirmStyle.Render(
+			"Delete \""+m.deleteTarget.title+"\"?  "+
+				confirmKeyStyle.Render("y")+" yes  "+
+				confirmKeyStyle.Render("n")+" no",
+		)
+	} else {
+		footer = " " + helpStyle.Render(
+			helpKeyStyle.Render("enter")+" open · "+
+				helpKeyStyle.Render("/")+" search · "+
+				helpKeyStyle.Render("e")+" edit · "+
+				helpKeyStyle.Render("n")+" new · "+
+				helpKeyStyle.Render("d")+" delete · "+
+				helpKeyStyle.Render("esc")+" back",
+		)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, body, "", footer)
 }
 
 func (m model) detailView() string {
