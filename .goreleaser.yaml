@@ -1,0 +1,69 @@
+# GoReleaser configuration — https://goreleaser.com
+# Builds cross-platform binaries and publishes them to GitHub Releases.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: th-note
+    main: .
+    binary: th-note
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on ARM64 is uncommon for a terminal app; skip it.
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: default
+    # th-note_linux_amd64.tar.gz, th-note_darwin_arm64.tar.gz, etc.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "th-note {{ .Tag }}"
+  footer: |
+    ---
+    ## Install
+
+    **Linux / macOS (one-liner):**
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/tanzid64/th-note/main/install.sh | sh
+    ```
+
+    **Manual:** download the archive for your OS/arch below, extract it, and put the `th-note` binary on your `PATH`.
